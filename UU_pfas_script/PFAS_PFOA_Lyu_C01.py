@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Mar 10 14:01:55 2025
+
+@author: 6346650
+"""
+
 #!/usr/bin/env python
 # coding: utf-8
 
@@ -35,7 +42,6 @@ from flopy.plot import PlotCrossSection,PlotMapView
 import flopy.utils.binaryfile as bf
 
 from tempfile import TemporaryDirectory
-import pandas as pd
 
 
 # In[ ]:
@@ -126,7 +132,7 @@ hk  = 100.0
 vka = 100.0
 lpf = MfUsgLpf(mf,ipakcb = ipakcb, constantcv=1, novfc=1,laytyp=4, 
                hk = hk,vka = vka, 
-               alpha = 0.008, beta = 3.2, sr = 0.075)
+               alpha = 0.008, beta = 3.2, sr = 0.2364, brook = 4.0)
 
 
 # In[ ]:
@@ -164,9 +170,8 @@ sms = MfUsgSms(mf,
 
 # In[ ]:
 
-porosity = 0.33
 
-bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = porosity, timeweight=1.0,
+bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, timeweight=1.0,
                anglex=anglex, dl =0.0, dt=0.0,
               iadsorb=1, bulkd=1.5, adsorb=0.0)
 
@@ -175,10 +180,8 @@ bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = porosity, 
 
 # In[ ]:
 
-recharge_val = 12.21
-input_conc = 0.1
 
-rch = MfUsgRch(mf,ipakcb=ipakcb,iconc=1, rech=recharge_val, rchconc=0.1)
+rch = MfUsgRch(mf,ipakcb=ipakcb,iconc=1, rech=12.21, rchconc=1.0)
 
 
 # a prescribed head boundary condition at the bottom that can control the degree of saturation of the soil column. For the saturated case, the prescribed head condition was above the top of the soil column at 20 cm. For the case of Sw = 0.68, The bottom head was set to -1.8 cm with van Genuchten parameters  = 12.6 cm-1,= 1.16, Sr = 0.22, and the Brooks Corey exponent = 4. The steady-state flow-fields thus generated were used for the transport simulations. 
@@ -268,7 +271,7 @@ bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, time
 
 
 mf.remove_package("CHD")
-chead=-13.24
+chead=-1.8
 lrcsc = {0:[[116,chead,chead,0.0],
             [117,chead,chead,0.0],
             [118,chead,chead,0.0],
@@ -281,11 +284,11 @@ chd = ModflowChd(mf,ipakcb = ipakcb, options=[], dtype=dtype, stress_period_data
 
 mf.remove_package("LPF")
 ipakcb = 50
-hk  = 2.0964e-2
-vka = 2.0964e-2
+hk  = 100.0
+vka = 100.0
 lpf = MfUsgLpf(mf,ipakcb = ipakcb, constantcv=1, novfc=1, laytyp=4, 
                hk = hk,vka = vka, 
-               alpha = 0.08, beta = 3.2, sr = 0.078)
+               alpha = 12.6, beta = 1.16, sr = 0.22, brook = 4.0)
 
 
 # In[ ]:
@@ -309,9 +312,9 @@ simconc3 = concobj.get_ts((119))
 
 mf.remove_package("BCT")
 bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, timeweight=1.0,
-               anglex=anglex, dl =0.7, dt=0.07,
+               anglex=anglex, dl =0.0, dt=0.0,
                iadsorb=1, bulkd=1.5, adsorb=0.08,
-               aw_adsorb=1, iarea_fn=1, ikawi_fn=1, awamax=216.0, alangaw=0.027, blangaw=0.0,
+               aw_adsorb=1, iarea_fn=1, ikawi_fn=1, awamax=216.0, alangaw=0.0027, blangaw=0.0,
               )
 
 
@@ -357,56 +360,15 @@ simconc5 = concobj.get_ts((119))
 
 
 # In[ ]:
-recharge_val = 12.21
-porosity = 0.33
-saturation = 0.68 # or should this be theta (e.g. 0.24)
-theta = 0.24
-velocity = abs(recharge_val/(porosity*saturation) ) # Pore water velocity cm/h
-print(velocity)
-PV = velocity/top  # Dimensionless time 
-print(PV)
+
+
 fig = plt.figure(figsize=(8, 5), dpi=150)
 ax = fig.add_subplot(111)
-#ax.plot(simconc1[:,0]/0.405, simconc1[:,1] , label="S=1, Kd=0")
-#ax.plot(simconc2[:,0]/0.405, simconc2[:,1] , label="S=1, Kd=0.08")
-#ax.plot(simconc3[:,0]/0.405, simconc3[:,1] , label="S=0.68, C=1")
-ax.plot(simconc4[:,0] * PV, simconc4[:,1]/input_conc , label="S=0.68, C=0.1")
-#ax.plot(simconc5[:,0]/0.405, simconc5[:,1] , label="S=0.68, C=0.01")
-
-ax.set_xlabel("Pore Volumes")
-ax.set_ylabel("Normalized concentration")
-ax.set_title("Adsorption of PFAS Adsorption on Air-Water Interface in the Unsaturated Zone")
-ax.legend()
-
-output_npz = r"C:\Users\6346650\OneDrive - Universiteit Utrecht\modelling\PFAS-LEACH-Screening-Python-04122022\results\data_GSI-USGT_Lyu_PFOA_01_flopy.npz"
-
-# Ensure the directory exists
-os.makedirs(os.path.dirname(output_npz), exist_ok=True)
-
-# Create data dictionary
-data = {
-    'T_d': simconc4[:,0] * PV,  # Assuming time steps are sequential indices
-    'C_relative': simconc4[:, 1]/input_conc  # Extract concentration values (assuming second column contains concentration)
-}
-
-# Save to .npz file
-np.savez(output_npz, **data)
-#check with file from .con 
-def load_npz_data(file_path: str) -> pd.DataFrame:
-    """Loads an NPZ file and converts its contents into a Pandas DataFrame.
-
-    Args:
-        file_path (str): Path to the NPZ file.
-
-    Returns:
-        pd.DataFrame: A DataFrame with the data extracted from the NPZ file.
-    """
-    with np.load(file_path) as data:
-        return pd.DataFrame({key: data[key].squeeze() for key in data.files})
-    
-gsi_usgt = load_npz_data(r"C:\Users\6346650\OneDrive - Universiteit Utrecht\modelling\PFAS-LEACH-Screening-Python-04122022\results\data_GSI-USGT_lyu_PFOA_01.npz")
-
-ax.plot(gsi_usgt['T_d'], gsi_usgt['C_relative'], label = "Gsi-Usgt C= 0.1")
+ax.plot(simconc1[:,0]/0.405, simconc1[:,1] , label="S=1, Kd=0")
+ax.plot(simconc2[:,0]/0.405, simconc2[:,1] , label="S=1, Kd=0.08")
+ax.plot(simconc3[:,0]/0.405, simconc3[:,1] , label="S=0.68, C=1")
+ax.plot(simconc4[:,0]/0.405, simconc4[:,1] , label="S=0.68, C=0.1")
+ax.plot(simconc5[:,0]/0.405, simconc5[:,1] , label="S=0.68, C=0.01")
 ax.set_xlabel("Pore Volumes")
 ax.set_ylabel("Normalized concentration")
 ax.set_title("Adsorption of PFAS Adsorption on Air-Water Interface in the Unsaturated Zone")

@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 
 import flopy
 from flopy.modflow import ModflowBas, ModflowChd,ModflowDis
-from flopy.mfusg import (MfUsg, MfUsgDisU, MfUsgLpf, MfUsgSms, 
+from flopy.mfusg import (MfUsg, MfUsgDisU, MfUsgLpf, MfUsgSms,
 MfUsgBct, MfUsgRch, MfUsgOc)
 from flopy.utils import HeadUFile
 from flopy.utils.gridgen import Gridgen
@@ -35,13 +35,12 @@ from flopy.plot import PlotCrossSection,PlotMapView
 import flopy.utils.binaryfile as bf
 
 from tempfile import TemporaryDirectory
-import pandas as pd
 
 
 # In[ ]:
 
 
-model_ws = "Ex9_PFAS"
+model_ws = "Brusseau_C01"
 
 # temp_dir = TemporaryDirectory()
 # model_ws = temp_dir.name
@@ -54,7 +53,7 @@ mf = MfUsg(
     version="mfusg",
     structured=True,
     model_ws= model_ws,
-    modelname="Ex9_PFAS",
+    modelname="Brusseau",
     exe_name="mfusg_gsi",
 )
 
@@ -91,8 +90,8 @@ g.build()
 
 # In[ ]:
 
-
-disu = g.get_disu(mf, itmuni=3, lenuni= 3, nper=1, perlen=2.025)
+#time discretization; divided up into two periods. see mfusg docs for itmuni and lenuni defs
+disu = g.get_disu(mf, itmuni=3, lenuni= 3, nper=2, perlen=[9,40.025])
 disu.ivsd=-1
 anglex = g.get_anglex()
 disu.iac.fmtin = "(10I4)"
@@ -115,20 +114,23 @@ mf.modelgrid = ugrid
 # In[ ]:
 
 
-bas = ModflowBas(mf,ibound=1,strt=15.0,richards=True,unstructured=True)
+bas = ModflowBas(mf,ibound=1,strt=-3,richards=True,unstructured=True)
 
 
 # In[ ]:
-
+# van Genuchten parameters
+alpha = 0.08 # 0.08  # cm^-1
+n = 3.2 #3.2
+theta_r = 0.078 # 0.078
+theta_s = 0.33
+m = 1 - 1/n
 
 ipakcb = 50
-hk  = 100.0
-vka = 100.0
-lpf = MfUsgLpf(mf,ipakcb = ipakcb, constantcv=1, novfc=1,laytyp=4, 
+hk  = 2.2e-2*3600
+vka = 2.2e-2*3600
+lpf = MfUsgLpf(mf,ipakcb = ipakcb, constantcv=1, novfc=1, laytyp=4, 
                hk = hk,vka = vka, 
-               alpha = 0.008, beta = 3.2, sr = 0.075)
-
-
+               alpha = alpha, beta = n, sr = theta_r)
 # In[ ]:
 
 
@@ -160,25 +162,29 @@ sms = MfUsgSms(mf,
 )
 
 
-# ## Saturated, C=1 at inlet.
 
 # In[ ]:
-
 porosity = 0.33
-
 bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = porosity, timeweight=1.0,
-               anglex=anglex, dl =0.0, dt=0.0,
-              iadsorb=1, bulkd=1.5, adsorb=0.0)
+               anglex=anglex, dl =0.7, dt=0.00,
+               iadsorb = 3, flich = 0.81, bulkd=1.5, adsorb=0.15,
+               aw_adsorb=3, iarea_fn=1, ikawi_fn= 1, awamax=350.0, alangaw=0.027, blangaw= 0,
+              )
 
 
 # Recharge was simulated from the top end at a rate of 12.21 cm/hr. For a porosity value of 0.33, the recharge rate is 12.21 cm/hr, and one pore volume (PV) is equal to 0.405 hours. 
 
 # In[ ]:
-
-recharge_val = 12.21
+recharge_val = 6.5 # roughly 10 *0.68
 input_conc = 0.1
 
-rch = MfUsgRch(mf,ipakcb=ipakcb,iconc=1, rech=recharge_val, rchconc=0.1)
+rch = MfUsgRch(
+    mf,
+    ipakcb=ipakcb,
+    iconc=1,
+    rech={0: recharge_val, 1: recharge_val},   # Recharge values for stress periods 0 and 1
+    rchconc={0: input_conc, 1: 0.00}    # Recharge concentration for stress periods 0 and 1
+)
 
 
 # a prescribed head boundary condition at the bottom that can control the degree of saturation of the soil column. For the saturated case, the prescribed head condition was above the top of the soil column at 20 cm. For the case of Sw = 0.68, The bottom head was set to -1.8 cm with van Genuchten parameters  = 12.6 cm-1,= 1.16, Sr = 0.22, and the Brooks Corey exponent = 4. The steady-state flow-fields thus generated were used for the transport simulations. 
@@ -192,8 +198,12 @@ dtype = np.dtype([
     ("ehead", np.float32),
     ("c01", np.float32)])
 
-chead = 16.0
+chead= -3
 lrcsc = {0:[[116,chead,chead,0.0],
+           [117,chead,chead,0.0],
+           [118,chead,chead,0.0],
+           [119,chead,chead,0.0]],
+          1:[[116,chead,chead,0.0],
             [117,chead,chead,0.0],
             [118,chead,chead,0.0],
             [119,chead,chead,0.0]]}
@@ -203,7 +213,8 @@ chd = ModflowChd(mf,ipakcb = ipakcb, options=[], dtype=dtype, stress_period_data
 # In[ ]:
 
 
-lrcsc = {(0,0): ["DELTAT 0.0205", "TMINAT 0.1", "TMAXAT 200.0", "TADJAT 1.0", "TCUTAT 2.0", "SAVE HEAD", "SAVE BUDGET", "SAVE CONC"]}
+lrcsc = {(0,0): ["DELTAT 0.0205", "TMINAT 0.1", "TMAXAT 200.0", "TADJAT 1.0", "TCUTAT 2.0", "SAVE HEAD", "SAVE BUDGET", "SAVE CONC"], 
+         (1,0): ["DELTAT 0.0205", "TMINAT 0.1", "TMAXAT 200.0", "TADJAT 1.0", "TCUTAT 2.0", "SAVE HEAD", "SAVE BUDGET", "SAVE CONC"] }
 
 oc = MfUsgOc(mf, atsa=1, npsteps=1, unitnumber= [14,30,31,0,0,132], stress_period_data = lrcsc,compact=False)
 
@@ -220,195 +231,86 @@ success, buff = mf.run_model()
 
 concobj = HeadUFile(f"{mf.model_ws}/{mf.name}.con", text='conc')
 simconc1 = concobj.get_ts((119))
+headobj = HeadUFile(f"{mf.model_ws}/{mf.name}.hds")
+times = headobj.get_times()
+datahead = headobj.get_data()
+print(datahead)
+
+values = [arr[0] for arr in datahead]
+
+# Create the discretization index
+indices = np.arange(len(datahead))
+
+# Plot
+plt.figure(figsize=(6, 8))
+plt.plot(values, indices, marker='o', linestyle='-')
+plt.xlabel("Head 'cm'")
+plt.ylabel("Discretization Index")
+plt.title("Head")
+plt.gca().invert_yaxis()
+plt.grid(True)
+
+plt.show()
+
+heads = headobj.get_alldata()  # Extract all heads
+selected_column = 2  # Change this based on your grid setup
+head_profile = heads[-1, :, selected_column]
+elevations = np.linspace(15, 0, heads.shape[1])  # Adjust based on discretization
+
+# Convert head to pressure head
+pressure_head = head_profile - elevations  # Element-wise operation
 
 
-# ## Saturated, C=1 at inlet, with adsorption (kd = 0.08). 
+# Compute water saturation using van Genuchten equation
+saturation = theta_r + (theta_s - theta_r) * (1 / ((1 + (alpha * np.abs(pressure_head))**n)**m))
 
-# In[ ]:
-
-
-mf.remove_package("BCT")
-bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, timeweight=1.0,
-               anglex=anglex, dl =0.0, dt=0.0,
-              iadsorb=1, bulkd=1.5, adsorb=0.08)
-
-
-# In[ ]:
-
-
-mf.write_input()
-success, buff = mf.run_model()
+plt.figure(figsize=(6, 8))
+plt.plot(saturation, elevations, marker='o', linestyle='-')
+plt.xlabel("Saturation")
+plt.ylabel("Depth (cm)")
+plt.title("Soil Water Saturation Profile")
+plt.gca().invert_yaxis()
+plt.grid(True)
+plt.show()
 
 
-# In[ ]:
+#%%
 
-
-concobj = HeadUFile(f"{mf.model_ws}/{mf.name}.con", text='conc')
-simconc2 = concobj.get_ts((119))
-
-
-# ## Saturation of 0.68,  A-W adsorption C=1, Kaw = 0.0021
-
-# In[ ]:
-
-
-mf.remove_package("BCT")
-bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, timeweight=1.0,
-               anglex=anglex, dl =0.0, dt=0.0,
-              iadsorb=1, bulkd=1.5, adsorb=0.08)
-
-bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, timeweight=1.0,
-               anglex=anglex, dl =0.0, dt=0.0,
-               iadsorb=1, bulkd=1.5, adsorb=0.08,
-               aw_adsorb=1, iarea_fn=1, ikawi_fn=1, awamax=216.0, alangaw=0.0021, blangaw=0.0,
-              )
-
-
-# In[ ]:
-
-
-mf.remove_package("CHD")
-chead=-13.24
-lrcsc = {0:[[116,chead,chead,0.0],
-            [117,chead,chead,0.0],
-            [118,chead,chead,0.0],
-            [119,chead,chead,0.0]]}
-chd = ModflowChd(mf,ipakcb = ipakcb, options=[], dtype=dtype, stress_period_data=lrcsc)
-
-
-# In[ ]:
-
-
-mf.remove_package("LPF")
-ipakcb = 50
-hk  = 2.0964e-2
-vka = 2.0964e-2
-lpf = MfUsgLpf(mf,ipakcb = ipakcb, constantcv=1, novfc=1, laytyp=4, 
-               hk = hk,vka = vka, 
-               alpha = 0.08, beta = 3.2, sr = 0.078)
-
-
-# In[ ]:
-
-
-mf.write_input()
-success, buff = mf.run_model()
-
-
-# In[ ]:
-
-
-concobj = HeadUFile(f"{mf.model_ws}/{mf.name}.con", text='conc')
-simconc3 = concobj.get_ts((119))
-
-
-# ## Saturation of 0.68,  A-W adsorption C=0.1, Kaw = 0.0027
-
-# In[ ]:
-
-
-mf.remove_package("BCT")
-bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, timeweight=1.0,
-               anglex=anglex, dl =0.7, dt=0.07,
-               iadsorb=1, bulkd=1.5, adsorb=0.08,
-               aw_adsorb=1, iarea_fn=1, ikawi_fn=1, awamax=216.0, alangaw=0.027, blangaw=0.0,
-              )
-
-
-# In[ ]:
-
-
-mf.write_input()
-success, buff = mf.run_model()
-
-
-# In[ ]:
-
-
-concobj = HeadUFile(f"{mf.model_ws}/{mf.name}.con", text='conc')
-simconc4 = concobj.get_ts((119))
-
-
-# ## Saturation of 0.68,  A-W adsorption C=0.01, Kaw = 0.0040
-
-# In[ ]:
-
-
-mf.remove_package("BCT")
-bct = MfUsgBct(mf, itvd = 9, cinact=-999.9, diffnc= 0.01944, prsity = 0.33, timeweight=1.0,
-               anglex=anglex, dl =0.0, dt=0.0,
-               iadsorb=1, bulkd=1.5, adsorb=0.08,
-               aw_adsorb=1, iarea_fn=1, ikawi_fn=1, awamax=216.0, alangaw=0.0040, blangaw=0.0,
-              )
-
-
-# In[ ]:
-
-
-mf.write_input()
-success, buff = mf.run_model()
-
-
-# In[ ]:
-
-
-concobj = HeadUFile(f"{mf.model_ws}/{mf.name}.con", text='conc')
-simconc5 = concobj.get_ts((119))
-
-
-# In[ ]:
-recharge_val = 12.21
-porosity = 0.33
+#calc pore volume
 saturation = 0.68 # or should this be theta (e.g. 0.24)
 theta = 0.24
 velocity = abs(recharge_val/(porosity*saturation) ) # Pore water velocity cm/h
 print(velocity)
 PV = velocity/top  # Dimensionless time 
 print(PV)
+
 fig = plt.figure(figsize=(8, 5), dpi=150)
 ax = fig.add_subplot(111)
-#ax.plot(simconc1[:,0]/0.405, simconc1[:,1] , label="S=1, Kd=0")
-#ax.plot(simconc2[:,0]/0.405, simconc2[:,1] , label="S=1, Kd=0.08")
-#ax.plot(simconc3[:,0]/0.405, simconc3[:,1] , label="S=0.68, C=1")
-ax.plot(simconc4[:,0] * PV, simconc4[:,1]/input_conc , label="S=0.68, C=0.1")
-#ax.plot(simconc5[:,0]/0.405, simconc5[:,1] , label="S=0.68, C=0.01")
-
-ax.set_xlabel("Pore Volumes")
-ax.set_ylabel("Normalized concentration")
-ax.set_title("Adsorption of PFAS Adsorption on Air-Water Interface in the Unsaturated Zone")
-ax.legend()
-
-output_npz = r"C:\Users\6346650\OneDrive - Universiteit Utrecht\modelling\PFAS-LEACH-Screening-Python-04122022\results\data_GSI-USGT_Lyu_PFOA_01_flopy.npz"
-
-# Ensure the directory exists
-os.makedirs(os.path.dirname(output_npz), exist_ok=True)
-
-# Create data dictionary
-data = {
-    'T_d': simconc4[:,0] * PV,  # Assuming time steps are sequential indices
-    'C_relative': simconc4[:, 1]/input_conc  # Extract concentration values (assuming second column contains concentration)
-}
-
-# Save to .npz file
-np.savez(output_npz, **data)
-#check with file from .con 
-def load_npz_data(file_path: str) -> pd.DataFrame:
-    """Loads an NPZ file and converts its contents into a Pandas DataFrame.
-
-    Args:
-        file_path (str): Path to the NPZ file.
-
-    Returns:
-        pd.DataFrame: A DataFrame with the data extracted from the NPZ file.
-    """
-    with np.load(file_path) as data:
-        return pd.DataFrame({key: data[key].squeeze() for key in data.files})
-    
-gsi_usgt = load_npz_data(r"C:\Users\6346650\OneDrive - Universiteit Utrecht\modelling\PFAS-LEACH-Screening-Python-04122022\results\data_GSI-USGT_lyu_PFOA_01.npz")
-
-ax.plot(gsi_usgt['T_d'], gsi_usgt['C_relative'], label = "Gsi-Usgt C= 0.1")
+ax.plot(simconc1[:,0]*PV, simconc1[:,1]/input_conc , label="S=0.68, Kd=0.15")
 ax.set_xlabel("Pore Volumes")
 ax.set_ylabel("Normalized concentration")
 ax.set_title("Adsorption of PFAS Adsorption on Air-Water Interface in the Unsaturated Zone")
 ax.legend()
 plt.show()
+
+
+#Define experiment parameters
+name_exp = "Brusseau"
+conc = "01"
+pfas_name = "PFOS"
+
+# Define output directory and filename
+output_npz = r"C:\Users\6346650\OneDrive - Universiteit Utrecht\modelling\PFAS-LEACH-Screening-Python-04122022\results\data_GSI-USGT_Brusseau_PFOS_01.npz"
+ 
+# Ensure the directory exists
+os.makedirs(os.path.dirname(output_npz), exist_ok=True)
+
+# # Create data dictionary
+data = {
+    'T_d': simconc1[:,0]*PV ,  #dimensionless time
+    'C_relative': simconc1[:, 1]/input_conc #Extract concentration values (assuming second column contains concentration)
+ }
+
+# Save to .npz file
+np.savez(output_npz, **data)
+print(f"Data saved to {output_npz}")
